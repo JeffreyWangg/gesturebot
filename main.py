@@ -41,7 +41,6 @@ class Gesture:
         self.rgb_image = None
         while self.rgb_image is None:
             pass
-
     def image_callback(self, msg):
         self.rgb_image = cv_bridge.CvBridge().compressed_imgmsg_to_cv2(msg)
 
