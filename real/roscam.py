@@ -9,12 +9,15 @@ import mediapipe as mp
 import copy
 import itertools
 import csv
-from model import KeyPointClassifier  
+from model import KeyPointClassifier  # Import KeyPointClassifier
+
 class GestureRecognizer:
     def __init__(self):
         # ROS setup
         self.bridge = CvBridge()
         self.cv_image = None
+
+        # Subscribe to camera feed
         rospy.Subscriber('/raspicam_node/image/compressed', CompressedImage, self.image_cb)
 
         # MediaPipe Hands setup
@@ -28,7 +31,7 @@ class GestureRecognizer:
 
         # Keypoint Classifier setup
         self.keypoint_classifier = KeyPointClassifier()
-        with open('model/keypoint_classifier/keypoint_classifier_label.csv', encoding='utf-8-sig') as f:
+        with open('/my_ros_data/catkin_ws/src/cosi119_src/gesture_cam/gesturebot/real/model/keypoint_classifier/keypoint_classifier_label.csv', encoding='utf-8-sig') as f:
             self.keypoint_classifier_labels = [row[0] for row in csv.reader(f)]
 
     def image_cb(self, msg):
@@ -38,13 +41,19 @@ class GestureRecognizer:
             self.cv_image = cv.imdecode(np_arr, cv.IMREAD_COLOR)
         except Exception as e:
             rospy.logerr(f"Image conversion failed: {e}")
-            return
-        self.process_frame()
+
+    def run(self):
+        """Main loop to process frames continuously."""
+        rospy.loginfo("Gesture recognizer is running...")
+        while not rospy.is_shutdown():
+            if self.cv_image is not None:
+                # Process the current frame
+                self.process_frame()
+            else:
+                rospy.loginfo_once("Waiting for camera feed...")
+            rospy.sleep(0.01)  # Small delay to prevent high CPU usage
 
     def process_frame(self):
-        if self.cv_image is None:
-            return
-
         image = cv.flip(self.cv_image, 1)  # Mirror image for convenience
         debug_image = copy.deepcopy(image)
 
@@ -140,4 +149,8 @@ class GestureRecognizer:
 if __name__ == "__main__":
     rospy.init_node("gesture_recognizer")
     recognizer = GestureRecognizer()
-    rospy.spin()
+    try:
+        recognizer.run()
+    except rospy.ROSInterruptException:
+        rospy.loginfo("Shutting down Gesture Recognizer.")
+    cv.destroyAllWindows()
