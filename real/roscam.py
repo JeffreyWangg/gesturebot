@@ -44,16 +44,22 @@ class GestureRecognizer:
 
     def run(self):
         """Main loop to process frames continuously."""
+        mode = 0
         rospy.loginfo("Gesture recognizer is running...")
         while not rospy.is_shutdown():
+            key = cv.waitKey(10)
+            if key == 27:  # ESC
+                break
+            number, mode = self.select_mode(key, mode)
+
             if self.cv_image is not None:
                 # Process the current frame
-                self.process_frame()
+                self.process_frame(number, mode)
             else:
                 rospy.loginfo_once("Waiting for camera feed...")
             rospy.sleep(0.01)  # Small delay to prevent high CPU usage
 
-    def process_frame(self):
+    def process_frame(self, number, mode):
         image = cv.flip(self.cv_image, 1)  # Mirror image for convenience
         debug_image = copy.deepcopy(image)
 
@@ -66,6 +72,9 @@ class GestureRecognizer:
                 # Process hand landmarks
                 landmark_list = self.calc_landmark_list(image, hand_landmarks)
                 preprocessed_landmarks = self.preprocess_landmarks(landmark_list)
+
+                #log to csv
+                self.logging_csv(number, mode, preprocessed_landmarks)
 
                 # Classify gesture
                 hand_sign_id = self.keypoint_classifier(preprocessed_landmarks)
@@ -144,6 +153,28 @@ class GestureRecognizer:
             cv.LINE_AA,
         )
         return image
+    
+    def select_mode(self, key, mode):
+        number = -1
+        if 48 <= key <= 57:  # 0 ~ 9
+            number = key - 48
+        if key == 110:  # n
+            mode = 0
+        if key == 107:  # k
+            print("start keypoints")
+            mode = 1
+        return number, mode
+    
+    def logging_csv(self, number, mode, landmark_list):
+        if mode == 0:
+            pass
+        if mode == 1 and (0 <= number <= 9):
+            csv_path = '/my_ros_data/catkin_ws/src/cosi119_src/gesture_cam/gesturebot/real/model/keypoint_classifier/keypoint.csv'
+            with open(csv_path, 'a', newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow([number, *landmark_list])
+                print(f"logged {number}")
+        return
 
 
 if __name__ == "__main__":
