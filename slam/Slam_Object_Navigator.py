@@ -178,7 +178,7 @@ class SLAMObjectNavigator:
 
 if __name__ == "__main__":
     navigator = SLAMObjectNavigator()
-    navigator.fiducial_ids = [102]  
+    navigator.fiducial_ids = [108]  
     try:
         navigator.run()
     except rospy.ROSInterruptException:

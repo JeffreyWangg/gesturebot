@@ -1,6 +1,6 @@
 <launch>
     <!-- SLAM Object Navigator -->
-    <node name="slam_object_navigator" pkg="your_package" type="slam_object_navigator.py" output="screen" />
+    <node name="slam_object_navigator" pkg="gesturebot" type="Slam_Object_Navigator.py" output="screen" />
 
     <!-- Include fiducial detection launch -->
     <include file="$(find aruco_detect)/launch/aruco_detect.launch">
