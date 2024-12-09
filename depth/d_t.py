@@ -5,7 +5,6 @@ import matplotlib.patches as patches
 
 filename = "couch2.jpeg"
 
-
 midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
 midas = torch.hub.load("intel-isl/MiDaS", "MiDaS_small")
 device = torch.device("cpu")

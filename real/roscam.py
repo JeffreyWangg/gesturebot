@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import rospy
-from sensor_msgs.msg import CompressedImage
+from sensor_msgs.msg import CompressedImage, Image
+from geometry_msgs.msg import Point, Pose, Twist
 from cv_bridge import CvBridge
 import cv2 as cv
 import numpy as np
@@ -10,15 +11,37 @@ import copy
 import itertools
 import csv
 from model import KeyPointClassifier  # Import KeyPointClassifier
+from mmdet.apis import DetInferencer
 
 class GestureRecognizer:
     def __init__(self):
+
+        self.objects = [
+        "person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", "boat",
+        "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog",
+        "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
+        "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
+        "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle",
+        "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich",
+        "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "sofa",
+        "pottedplant", "bed", "diningtable", "toilet", "tvmonitor", "laptop", "mouse", "remote",
+        "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book",
+        "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush"
+        ]
+
         # ROS setup
         self.bridge = CvBridge()
         self.cv_image = None
 
         # Subscribe to camera feed
-        rospy.Subscriber('/raspicam_node/image/compressed', CompressedImage, self.image_cb)
+        # rospy.Subscriber('/cv_camera/image_raw', Image, self.image_cb)
+        self.image_sub = rospy.Subscriber('/raspicam_node/image/compressed',
+                                          CompressedImage,
+                                          self.image_cb)
+
+        #Publishers
+        self.cmd_vel_pub = rospy.Publisher('cmd_vel', Twist, queue_size=1)
+        self.image_pub = rospy.Publisher("/image", Image, queue_size=1)
 
         # MediaPipe Hands setup
         self.mp_hands = mp.solutions.hands
@@ -29,21 +52,59 @@ class GestureRecognizer:
             min_tracking_confidence=0.5,
         )
 
+        self.gesture_count = 0
+        self.previous_gesture = None
+        self.gesture = None
+
         # Keypoint Classifier setup
         self.keypoint_classifier = KeyPointClassifier()
-        with open('/my_ros_data/catkin_ws/src/cosi119_src/gesture_cam/gesturebot/real/model/keypoint_classifier/keypoint_classifier_label.csv', encoding='utf-8-sig') as f:
+        # with open('/my_ros_data/catkin_ws/src/cosi119_src/gesture_cam/gesturebot/real/model/keypoint_classifier/keypoint_classifier_label.csv', encoding='utf-8-sig') as f:
+        with open('/my_ros_data/gesture/src/real/model/keypoint_classifier/keypoint_classifier_label.csv', encoding='utf-8-sig') as f:
             self.keypoint_classifier_labels = [row[0] for row in csv.reader(f)]
+
+        # obj seg
+        config_file = 'rtmdet_tiny_8xb32-300e_coco.py'
+        checkpoint_file = 'rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth'
+        self.inferencer = DetInferencer(config_file, checkpoint_file, device="cpu")
+
+        while self.cv_image is None:
+            pass
 
     def image_cb(self, msg):
         """Process incoming images from the camera."""
         try:
-            np_arr = np.frombuffer(msg.data, np.uint8)
-            self.cv_image = cv.imdecode(np_arr, cv.IMREAD_COLOR)
+            # np_arr = np.frombuffer(msg.data, np.uint8)
+            # self.cv_image = cv.imdecode(np_arr, cv.IMREAD_COLOR)
+            self.cv_image = self.bridge.compressed_imgmsg_to_cv2(msg)
         except Exception as e:
             rospy.logerr(f"Image conversion failed: {e}")
 
+    def segmentation_callback(self, event):
+        # Convert the ROS Image message to a CV2 image
+        # cv_image = self.bridge.compressed_imgmsg_to_cv2(self.cv_image) #rgb
+        # cv_image = self.bridge.imgmsg_to_cv2(self.image) #rgb
+
+        # obj seg
+        output = self.inferencer(self.cv_image)
+
+        #keep is list of indices for output['predictions']
+        keep = self.non_max_suppression(output['predictions'][0]['bboxes'], output['predictions'][0]['scores'], 0.5)[:5]
+        print([self.objects[i] for i in [output['predictions'][0]['labels'][i] for i in keep]])
+
+        image = self.cv_image
+
+        for box in bboxes:
+            # print(box)
+            bottom = (int(box[0]), int(box[1]))
+            top = (int(box[2]), int(box[3]))
+            image = cv.rectangle(image, bottom, top, (0, 0, 255), 2)
+        image_msg = self.bridge.cv2_to_imgmsg(image)
+        self.image_pub.publish(image_msg)
+
     def run(self):
         """Main loop to process frames continuously."""
+        rospy.Timer(rospy.Duration(1.5), self.segmentation_callback) #start object recognition callback
+
         rospy.loginfo("Gesture recognizer is running...")
         while not rospy.is_shutdown():
             if self.cv_image is not None:
@@ -52,6 +113,25 @@ class GestureRecognizer:
             else:
                 rospy.loginfo_once("Waiting for camera feed...")
             rospy.sleep(0.01)  # Small delay to prevent high CPU usage
+
+    #for object segmentation
+    def non_max_suppression(self, boxes, scores, threshold):
+        order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+        keep = []
+        while order:
+            i = order.pop(0)
+            keep.append(i)
+            for j in order:
+                # Calculate the IoU between the two boxes
+                intersection = max(0, min(boxes[i][2], boxes[j][2]) - max(boxes[i][0], boxes[j][0])) * \
+                            max(0, min(boxes[i][3], boxes[j][3]) - max(boxes[i][1], boxes[j][1]))
+                union = (boxes[i][2] - boxes[i][0]) * (boxes[i][3] - boxes[i][1]) + \
+                        (boxes[j][2] - boxes[j][0]) * (boxes[j][3] - boxes[j][1]) - intersection
+                iou = intersection / union
+
+                if iou > threshold:
+                    order.remove(j)
+        return keep
 
     def process_frame(self):
         image = cv.flip(self.cv_image, 1)  # Mirror image for convenience
