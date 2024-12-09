@@ -80,26 +80,31 @@ class GestureRecognizer:
             rospy.logerr(f"Image conversion failed: {e}")
 
     def segmentation_callback(self, event):
-        # Convert the ROS Image message to a CV2 image
-        # cv_image = self.bridge.compressed_imgmsg_to_cv2(self.cv_image) #rgb
-        # cv_image = self.bridge.imgmsg_to_cv2(self.image) #rgb
+        if self.gesture == 'Open':
+            # Convert the ROS Image message to a CV2 image
+            # cv_image = self.bridge.compressed_imgmsg_to_cv2(self.cv_image) #rgb
+            # cv_image = self.bridge.imgmsg_to_cv2(self.image) #rgb
 
-        # obj seg
-        output = self.inferencer(self.cv_image)
+            # obj seg
+            output = self.inferencer(self.cv_image)
 
-        #keep is list of indices for output['predictions']
-        keep = self.non_max_suppression(output['predictions'][0]['bboxes'], output['predictions'][0]['scores'], 0.5)[:5]
-        print([self.objects[i] for i in [output['predictions'][0]['labels'][i] for i in keep]])
+            #keep is list of indices for output['predictions']
+            keep = self.non_max_suppression(output['predictions'][0]['bboxes'], output['predictions'][0]['scores'], 0.5)[:5]
+            print([self.objects[i] for i in [output['predictions'][0]['labels'][i] for i in keep]])
 
-        image = self.cv_image
+            #===============================================
+            # We need to filter out objects like chairs, tables, tv monitors and people
 
-        for box in bboxes:
-            # print(box)
-            bottom = (int(box[0]), int(box[1]))
-            top = (int(box[2]), int(box[3]))
-            image = cv.rectangle(image, bottom, top, (0, 0, 255), 2)
-        image_msg = self.bridge.cv2_to_imgmsg(image)
-        self.image_pub.publish(image_msg)
+            image = self.cv_image
+            bboxes = [output['predictions'][0]['bboxes'][i] for i in keep]
+
+            for box in bboxes:
+                # print(box)
+                bottom = (int(box[0]), int(box[1]))
+                top = (int(box[2]), int(box[3]))
+                image = cv.rectangle(image, bottom, top, (0, 0, 255), 2)
+            image_msg = self.bridge.cv2_to_imgmsg(image)
+            self.image_pub.publish(image_msg)
 
     def run(self):
         """Main loop to process frames continuously."""
@@ -159,6 +164,17 @@ class GestureRecognizer:
                 # Classify gesture
                 hand_sign_id = self.keypoint_classifier(preprocessed_landmarks)
                 hand_sign_label = self.keypoint_classifier_labels[hand_sign_id]
+                
+                #multiple gestures required for recognition
+                if self.previous_gesture is None or self.previous_gesture == hand_sign_label:
+                    self.gesture_count += 1
+                else:
+                    self.gesture_count = 0
+                if self.gesture_count > 30:
+                    print(f"Gesture is now {hand_sign_label}")
+                    self.gesture = hand_sign_label
+                self.previous_gesture = hand_sign_label
+
 
                 # Annotate image
                 brect = self.calc_bounding_rect(image, hand_landmarks)
