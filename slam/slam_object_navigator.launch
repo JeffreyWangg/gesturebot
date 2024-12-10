@@ -1,8 +1,9 @@
 <launch>
     <!-- SLAM Object Navigator -->
-    <node name="slam_object_navigator" pkg="gesturebot" type="Slam_Object_Navigator.py" output="screen" />
+    <node name="slam_object_navigator" pkg="gesture_cam" type="Slam_Object_Navigator.py" output="screen" />
 
     <!-- Include fiducial detection launch -->
+    
     <include file="$(find aruco_detect)/launch/aruco_detect.launch">
         <param name="publish_images" value="true" />
         <arg name="do_pose_estimation" value="true" />
@@ -14,6 +15,11 @@
     </include>
 
     <!-- Fiducial Mapping -->
-    <node name="mapper" pkg="fiducial_nav" type="mapper_real.py" output="screen" />
-    <node name="my_odom" pkg="fiducial_nav" type="my_odom.py" output="screen" />
+    <node name="mapper" pkg="gesture_cam" type="mapper_real.py" output="screen" />
+    <node name="my_odom" pkg="gesture_cam" type="my_odom.py" output="screen" />
+
+
+    <!-- slam nodes -->
+    <node name="pure_pursuit" pkg="gesture_cam" type="pure_pursuit.py" output="screen" />
+    <node name="frontier_exploration" pkg="gesture_cam" type="frontier_exploration.py" output="screen" />
 </launch>

@@ -8,10 +8,10 @@ import subprocess
 import numpy as np
 from typing import Union
 from path_planner import PathPlanner
-from frontier_search import FrontierSearch
+from gesturebot.frontier_search import FrontierSearch
 from nav_msgs.msg import OccupancyGrid, Path, GridCells, Odometry
 from geometry_msgs.msg import Pose, Point, Quaternion
-from lab4.msg import FrontierList
+from gesture_cam.msg import FrontierList
 from tf import TransformListener
 from tf.transformations import euler_from_quaternion
 
@@ -21,8 +21,7 @@ class FrontierExploration:
         """
         Class constructor
         """
-        rospy.init_node("frontier_exploration")
-
+       
         # Set if in debug mode
         self.is_in_debug_mode = (
             rospy.has_param("~debug") and rospy.get_param("~debug") == "true"

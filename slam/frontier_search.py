@@ -2,7 +2,7 @@
 
 from path_planner import PathPlanner
 from nav_msgs.msg import OccupancyGrid
-from lab4.msg import Frontier, FrontierList
+from gesture_cam.msg import Frontier, FrontierList
 
 
 class FrontierSearch:

@@ -3,7 +3,7 @@
 import math
 import rospy
 import numpy as np
-from path_planner import PathPlanner
+from gesturebot.path_planner import PathPlanner
 from std_msgs.msg import Header, Bool
 from nav_msgs.msg import Path, Odometry, GridCells, OccupancyGrid
 from geometry_msgs.msg import Point, PointStamped, Twist, Vector3, Pose, Quaternion
@@ -16,7 +16,7 @@ class PurePursuit:
         """
         Class constructor
         """
-        rospy.init_node("pure_pursuit")
+        # rospy.init_node("pure_pursuit")
 
         # Set if in debug mode
         self.is_in_debug_mode = (
