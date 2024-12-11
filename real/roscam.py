@@ -38,7 +38,7 @@ class GestureRecognizer:
         self.cv_image = None
 
         # Subscribe to camera feed
-        # rospy.Subscriber('/cv_camera/image_raw', Image, self.image_cb)
+        # rospy.Subscriber('/cv_camera/image_raw', Image, self.image_cb) <= for branbot
         self.image_sub = rospy.Subscriber('/raspicam_node/image/compressed',
                                           CompressedImage,
                                           self.image_cb)
@@ -63,9 +63,7 @@ class GestureRecognizer:
 
         # Keypoint Classifier setup
         self.keypoint_classifier = KeyPointClassifier()
-        # with open('/my_ros_data/catkin_ws/src/cosi119_src/gesture_cam/gesturebot/real/model/keypoint_classifier/keypoint_classifier_label.csv', encoding='utf-8-sig') as f:
-        with open('/my_ros_data/gesture/src/real/model/keypoint_classifier/keypoint_classifier_label.csv', encoding='utf-8-sig') as f:
-            self.keypoint_classifier_labels = [row[0] for row in csv.reader(f)]
+        self.keypoint_classifier_labels = ['Open', 'Close', 'Pointer', 'OK', 'Peace Sign']
 
         #================ obj seg
         self.force_recog = False
@@ -91,10 +89,7 @@ class GestureRecognizer:
             pass
 
     def image_cb(self, msg):
-        """Process incoming images from the camera."""
         try:
-            # np_arr = np.frombuffer(msg.data, np.uint8)
-            # self.cv_image = cv.imdecode(np_arr, cv.IMREAD_COLOR)
             self.cv_image = self.bridge.compressed_imgmsg_to_cv2(msg)
         except Exception as e:
             rospy.logerr(f"Image conversion failed: {e}")
@@ -112,25 +107,20 @@ class GestureRecognizer:
                 align_corners=False,
             ).squeeze()
 
-        # print([output['predictions'][0]['bboxes'][i] for i in keep])
         # to draw image
         self.disparity_map = prediction.cpu().numpy()
         output_image = self.disparity_map / 1200
 
         if self.debug_Box:
-            bottom = (int(self.debug_Box[0]), int(debug_Box[1]))
-            top = (int(debug_Box[2]), int(debug_Box[3]))
-            output_image = cv2.rectangle(output_image, bottom, top, (0, 255, 0), 2)
+            bottom = (int(self.debug_Box[0]), int(self.debug_Box[1]))
+            top = (int(self.debug_Box[2]), int(self.debug_Box[3]))
+            output_image = cv.rectangle(output_image, bottom, top, (0, 255, 0), 2)
 
         image_msg = self.bridge.cv2_to_imgmsg(output_image)
         self.depth_image_pub.publish(image_msg)
 
     def segmentation_callback(self, event):
         if self.gesture == 'Open' or self.force_recog:
-            # Convert the ROS Image message to a CV2 image
-            # cv_image = self.bridge.compressed_imgmsg_to_cv2(self.cv_image) #rgb
-            # cv_image = self.bridge.imgmsg_to_cv2(self.image) #rgb
-
             # obj seg
             output = self.inferencer(self.cv_image)
             self.predictions = output['predictions'][0]
@@ -151,7 +141,6 @@ class GestureRecognizer:
             bboxes = [self.predictions['bboxes'][i] for i in self.keep]
 
             for box in bboxes:
-                # print(box)
                 bottom = (int(box[0]), int(box[1]))
                 top = (int(box[2]), int(box[3]))
                 image = cv.rectangle(image, bottom, top, (0, 0, 255), 2)
@@ -159,15 +148,14 @@ class GestureRecognizer:
             self.image_pub.publish(image_msg)
 
     def run(self):
-        """Main loop to process frames continuously."""
         rospy.Timer(rospy.Duration(1.5), self.segmentation_callback) #start object recognition callback
-        rospy.Timer(rospy.Duration(1.5), self.depth_callback) #start object recognition callback
+        rospy.Timer(rospy.Duration(1.5), self.depth_callback) #start depth estimation callback
 
         mode = 0
-        rospy.loginfo("Gesture recognizer is running...")
+        print("Gesture Recognition Running")
         while not rospy.is_shutdown():
             key = cv.waitKey(10)
-            if key == 27:  # ESC
+            if key == 27:  # esc key
                 break
             number, mode = self.select_mode(key, mode)
 
@@ -178,8 +166,6 @@ class GestureRecognizer:
             if self.cv_image is not None:
                 # Process the current frame
                 self.process_frame(number, mode)
-            else:
-                rospy.loginfo_once("Waiting for camera feed...")
             rospy.sleep(0.01)  # Small delay to prevent high CPU usage
 
     def move_to_object(self, object):
@@ -188,11 +174,17 @@ class GestureRecognizer:
         rate = rospy.Rate(200)
         twist = Twist()
         self.force_recog = True
+        miss_counter = 0
+
         while True:
             object_list = [self.objects[i] for i in [self.predictions['labels'][i] for i in self.keep]] #same size as keep
             print(object_list)
             if object not in object_list:
+                miss_counter += 1
+                if miss_counter >= 30: #for 6 seconds
+                    break
                 continue
+            miss_counter = 0
             object_prediction_index = self.keep[object_list.index(object)]
             print(self.objects[self.predictions['labels'][object_prediction_index]])
             box = self.predictions['bboxes'][object_prediction_index]
@@ -217,9 +209,6 @@ class GestureRecognizer:
         twist.linear.x = 0
         self.cmd_vel_pub.publish(twist)
 
-
-        # get bounding box of object
-
     #for object segmentation
     def non_max_suppression(self, boxes, scores, threshold):
         order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
@@ -228,7 +217,7 @@ class GestureRecognizer:
             i = order.pop(0)
             keep.append(i)
             for j in order:
-                # Calculate the IoU between the two boxes
+                # iou between the two boxes
                 intersection = max(0, min(boxes[i][2], boxes[j][2]) - max(boxes[i][0], boxes[j][0])) * \
                             max(0, min(boxes[i][3], boxes[j][3]) - max(boxes[i][1], boxes[j][1]))
                 union = (boxes[i][2] - boxes[i][0]) * (boxes[i][3] - boxes[i][1]) + \
@@ -243,13 +232,11 @@ class GestureRecognizer:
         image = cv.flip(self.cv_image, 1)  # Mirror image for convenience
         debug_image = copy.deepcopy(image)
 
-        # Convert image to RGB for MediaPipe
         rgb_image = cv.cvtColor(image, cv.COLOR_BGR2RGB)
         results = self.hands.process(rgb_image)
 
         if results.multi_hand_landmarks:
             for hand_landmarks in results.multi_hand_landmarks:
-                # Process hand landmarks
                 landmark_list = self.calc_landmark_list(image, hand_landmarks)
                 preprocessed_landmarks = self.preprocess_landmarks(landmark_list)
 
@@ -260,7 +247,7 @@ class GestureRecognizer:
                 hand_sign_id = self.keypoint_classifier(preprocessed_landmarks)
                 hand_sign_label = self.keypoint_classifier_labels[hand_sign_id]
                 
-                #multiple gestures required for recognition
+                #multiple gestures are required for recognition
                 if self.previous_gesture is None or self.previous_gesture == hand_sign_label:
                     self.gesture_count += 1
                 else:
@@ -271,17 +258,13 @@ class GestureRecognizer:
                 self.previous_gesture = hand_sign_label
 
 
-                # Annotate image
-                brect = self.calc_bounding_rect(image, hand_landmarks)
+                # debug image
                 debug_image = self.draw_landmarks(debug_image, landmark_list)
-                debug_image = self.draw_bounding_rect(debug_image, brect)
-                debug_image = self.draw_info_text(debug_image, brect, hand_sign_label)
 
         cv.imshow("Gesture Recognition", debug_image)
         cv.waitKey(1)
 
-    def calc_landmark_list(self, image, hand_landmarks):
-        """Calculate pixel coordinates of landmarks."""
+    def calc_landmark_list(self, image, hand_landmarks): #get pixel location
         image_width, image_height = image.shape[1], image.shape[0]
         return [
             [
@@ -291,8 +274,7 @@ class GestureRecognizer:
             for landmark in hand_landmarks.landmark
         ]
 
-    def preprocess_landmarks(self, landmark_list):
-        """Normalize landmarks to relative coordinates and scale."""
+    def preprocess_landmarks(self, landmark_list): # need to normalize
         temp_landmark_list = copy.deepcopy(landmark_list)
 
         # Normalize based on the wrist (first landmark)
@@ -310,48 +292,18 @@ class GestureRecognizer:
 
         return temp_landmark_list
 
-    def calc_bounding_rect(self, image, hand_landmarks):
-        """Calculate bounding rectangle for hand."""
-        image_width, image_height = image.shape[1], image.shape[0]
-        points = [
-            (int(landmark.x * image_width), int(landmark.y * image_height))
-            for landmark in hand_landmarks.landmark
-        ]
-        x, y, w, h = cv.boundingRect(np.array(points))
-        return [x, y, x + w, y + h]
-
     def draw_landmarks(self, image, landmark_list):
-        """Draw landmarks on the image."""
         for point in landmark_list:
             cv.circle(image, tuple(point), 5, (255, 0, 0), -1)
-        return image
-
-    def draw_bounding_rect(self, image, brect):
-        """Draw bounding rectangle on the image."""
-        cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[3]), (0, 255, 0), 2)
-        return image
-
-    def draw_info_text(self, image, brect, hand_sign_label):
-        """Draw gesture information on the image."""
-        cv.putText(
-            image,
-            hand_sign_label,
-            (brect[0], brect[1] - 10),
-            cv.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (255, 255, 255),
-            1,
-            cv.LINE_AA,
-        )
         return image
     
     def select_mode(self, key, mode):
         number = -1
         if 48 <= key <= 57:  # 0 ~ 9
             number = key - 48
-        if key == 110:  # n
+        if key == 110:  # n, to change back to no logging
             mode = 0
-        if key == 107:  # k
+        if key == 107:  # k, to change to logging
             print("start keypoints")
             mode = 1
         return number, mode

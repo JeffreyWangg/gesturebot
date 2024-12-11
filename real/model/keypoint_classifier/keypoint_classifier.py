@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import numpy as np
 import tensorflow as tf
 
@@ -7,7 +5,7 @@ import tensorflow as tf
 class KeyPointClassifier(object):
     def __init__(
         self,
-        model_path= '/my_ros_data/gesture/src/real/model/keypoint_classifier/keypoint_classifier.tflite',
+        model_path= '/Users/jwang/Documents/gesturebot/real/model/keypoint_classifier/keypoint_classifier.tflite',
         num_threads=1,
     ):
         self.interpreter = tf.lite.Interpreter(model_path=model_path,
