@@ -48,9 +48,6 @@ model.fit(
     callbacks=[cp_callback, es_callback]
 )
 
-# Model evaluation
-val_loss, val_acc = model.evaluate(X_test, y_test, batch_size=128)
-
 model.export('model/keypoint_classifier/tf_model')
 converter = tf.lite.TFLiteConverter.from_saved_model('model/keypoint_classifier/tf_model')
 converter.optimizations = [tf.lite.Optimize.DEFAULT]

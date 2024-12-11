@@ -5,7 +5,7 @@ checkpoint_file = 'rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth'
 inferencer = DetInferencer(config_file, checkpoint_file, device="cpu")
 
 # Perform inference
-output = inferencer('couch2.jpeg', show=True)
+output = inferencer('couch2.jpeg')
 
 def non_max_suppression(boxes, scores, threshold):
     order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
@@ -26,6 +26,7 @@ def non_max_suppression(boxes, scores, threshold):
     return keep
 
 keep = non_max_suppression(output['predictions'][0]['bboxes'], output['predictions'][0]['scores'], 0.5)
+print(keep)
 # print([output['predictions'][0]['labels'][i] for i in keep], [output['predictions'][0]['scores'][i] for i in keep])
 # print([output['predictions'][0]['bboxes'][i] for i in keep])
 # ok this works
