@@ -41,11 +41,23 @@ class DepthObjSeg:
         checkpoint_file = 'rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth'
         self.inferencer = DetInferencer(config_file, checkpoint_file, device="cpu")
 
-        while self.image is None:
+        # depth
+        self.midas = torch.hub.load("intel-isl/MiDaS", "MiDaS_small")
+        midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
+
+        self.device = torch.device("cpu")
+        self.midas.to(self.device)
+        self.midas.eval()
+
+        self.transform = midas_transforms.small_transform
+
+        while self.transform and self.image is None:
             pass
 
     def image_callback(self, msg):
         self.image = msg
+
+    #depth MIGHT be 1305.2767 * 0.9575^x
 
     def timer_callback(self, event):
         # Convert the ROS Image message to a CV2 image
@@ -56,16 +68,59 @@ class DepthObjSeg:
         output = self.inferencer(cv_image)
 
         #keep is list of indices for output['predictions']
-        keep = self.non_max_suppression(output['predictions'][0]['bboxes'], output['predictions'][0]['scores'], 0.5)[:5]
+        keep = self.non_max_suppression(output['predictions'][0]['bboxes'], output['predictions'][0]['scores'], 0.5)[:8]
         print([self.objects[i] for i in [output['predictions'][0]['labels'][i] for i in keep]])
+
+        # depth 
+        input_batch = self.transform(cv_image).to(self.device)
+
+        with torch.no_grad():
+            prediction = self.midas(input_batch)
+
+            prediction = torch.nn.functional.interpolate(
+                prediction.unsqueeze(1),
+                size=cv_image.shape[:2],
+                mode="bicubic",
+                align_corners=False,
+            ).squeeze()
+
+        # print([output['predictions'][0]['bboxes'][i] for i in keep])
+        # to draw image
+        output_image_raw = prediction.cpu().numpy()
+        output_image = output_image_raw / 1200
+        bboxes = [output['predictions'][0]['bboxes'][i] for i in keep]
+
+        #print depths for test
+        # self.print_depths(bboxes, output_image_raw)
+        depths = self.calc_depth(bboxes, output_image_raw)
+        # for i in range(len(keep) - 1):
+        #     if self.objects[output['predictions'][0]['labels'][keep[i]]] == 'bottle':
+        #         print(depths[i])
+        #         print(65.5181 * (0.9978 ** depths[i]))
+
 
         for box in bboxes:
             # print(box)
             bottom = (int(box[0]), int(box[1]))
             top = (int(box[2]), int(box[3]))
-            cv_image = cv2.rectangle(cv_image, bottom, top, (0, 0, 255), 2)
-        image_msg = self.bridge.cv2_to_imgmsg(cv_image)
+            output_image = cv2.rectangle(output_image, bottom, top, (0, 0, 255), 2)
+        image_msg = self.bridge.cv2_to_imgmsg(output_image)
         self.image_pub.publish(image_msg)
+
+    def calc_depth(self, bboxes, disparity_map):
+        result = []
+        for box in bboxes:
+            #x is column y is row, so do [y][x]
+            x_min = int(box[0])
+            y_min = int(box[1])
+            x_max = int(box[2])
+            y_max = int(box[3])
+            subarray = disparity_map[x_min:x_max, y_min:y_max]
+            median = np.median(subarray)
+            mask = subarray >= median
+            subarray = subarray[mask]
+            result.append(np.mean(subarray))
+        return result
 
     def non_max_suppression(self, boxes, scores, threshold):
         order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)

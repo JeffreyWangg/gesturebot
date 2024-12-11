@@ -12,6 +12,7 @@ import itertools
 import csv
 from model import KeyPointClassifier  # Import KeyPointClassifier
 from mmdet.apis import DetInferencer
+import torch
 
 class GestureRecognizer:
     def __init__(self):
@@ -28,6 +29,9 @@ class GestureRecognizer:
         "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book",
         "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush"
         ]
+        self.banned_objects = [
+            "person", "chair", "tvmonitor", "diningtable", "bench"
+        ]
 
         # ROS setup
         self.bridge = CvBridge()
@@ -42,6 +46,7 @@ class GestureRecognizer:
         #Publishers
         self.cmd_vel_pub = rospy.Publisher('cmd_vel', Twist, queue_size=1)
         self.image_pub = rospy.Publisher("/image", Image, queue_size=1)
+        self.depth_image_pub = rospy.Publisher("/depth_image", Image, queue_size=1)
 
         # MediaPipe Hands setup
         self.mp_hands = mp.solutions.hands
@@ -62,12 +67,27 @@ class GestureRecognizer:
         with open('/my_ros_data/gesture/src/real/model/keypoint_classifier/keypoint_classifier_label.csv', encoding='utf-8-sig') as f:
             self.keypoint_classifier_labels = [row[0] for row in csv.reader(f)]
 
-        # obj seg
+        #================ obj seg
+        self.force_recog = False
         config_file = 'rtmdet_tiny_8xb32-300e_coco.py'
         checkpoint_file = 'rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth'
         self.inferencer = DetInferencer(config_file, checkpoint_file, device="cpu")
 
-        while self.cv_image is None:
+        self.predictions = None
+        self.keep = None
+
+        #================ depth 
+        self.midas = torch.hub.load("intel-isl/MiDaS", "MiDaS_small")
+        midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
+
+        self.device = torch.device("cpu")
+        self.midas.to(self.device)
+        self.midas.eval()
+        self.debug_Box = None
+
+        self.transform = midas_transforms.small_transform
+
+        while self.transform and self.cv_image is None:
             pass
 
     def image_cb(self, msg):
@@ -79,24 +99,56 @@ class GestureRecognizer:
         except Exception as e:
             rospy.logerr(f"Image conversion failed: {e}")
 
+    def depth_callback(self, event):
+        input_batch = self.transform(self.cv_image).to(self.device)
+
+        with torch.no_grad():
+            prediction = self.midas(input_batch)
+
+            prediction = torch.nn.functional.interpolate(
+                prediction.unsqueeze(1),
+                size=self.cv_image.shape[:2],
+                mode="bicubic",
+                align_corners=False,
+            ).squeeze()
+
+        # print([output['predictions'][0]['bboxes'][i] for i in keep])
+        # to draw image
+        self.disparity_map = prediction.cpu().numpy()
+        output_image = self.disparity_map / 1200
+
+        if self.debug_Box:
+            bottom = (int(self.debug_Box[0]), int(debug_Box[1]))
+            top = (int(debug_Box[2]), int(debug_Box[3]))
+            output_image = cv2.rectangle(output_image, bottom, top, (0, 255, 0), 2)
+
+        image_msg = self.bridge.cv2_to_imgmsg(output_image)
+        self.depth_image_pub.publish(image_msg)
+
     def segmentation_callback(self, event):
-        if self.gesture == 'Open':
+        if self.gesture == 'Open' or self.force_recog:
             # Convert the ROS Image message to a CV2 image
             # cv_image = self.bridge.compressed_imgmsg_to_cv2(self.cv_image) #rgb
             # cv_image = self.bridge.imgmsg_to_cv2(self.image) #rgb
 
             # obj seg
             output = self.inferencer(self.cv_image)
+            self.predictions = output['predictions'][0]
 
             #keep is list of indices for output['predictions']
-            keep = self.non_max_suppression(output['predictions'][0]['bboxes'], output['predictions'][0]['scores'], 0.5)[:5]
-            print([self.objects[i] for i in [output['predictions'][0]['labels'][i] for i in keep]])
+            keep = self.non_max_suppression(self.predictions['bboxes'], self.predictions['scores'], 0.5)[:10]
 
             #===============================================
             # We need to filter out objects like chairs, tables, tv monitors and people
+            for index in keep:
+                keep = list(filter(lambda index: self.objects[self.predictions['labels'][index]] not in self.banned_objects, keep))
+            self.keep = keep
+            
+            print([self.predictions['scores'][i] for i in self.keep])
+            print([self.objects[i] for i in [self.predictions['labels'][i] for i in self.keep]])
 
             image = self.cv_image
-            bboxes = [output['predictions'][0]['bboxes'][i] for i in keep]
+            bboxes = [self.predictions['bboxes'][i] for i in self.keep]
 
             for box in bboxes:
                 # print(box)
@@ -109,6 +161,7 @@ class GestureRecognizer:
     def run(self):
         """Main loop to process frames continuously."""
         rospy.Timer(rospy.Duration(1.5), self.segmentation_callback) #start object recognition callback
+        rospy.Timer(rospy.Duration(1.5), self.depth_callback) #start object recognition callback
 
         mode = 0
         rospy.loginfo("Gesture recognizer is running...")
@@ -118,12 +171,54 @@ class GestureRecognizer:
                 break
             number, mode = self.select_mode(key, mode)
 
+            #testing
+            if self.gesture == 'Pointer':
+                self.move_to_object("book")
+
             if self.cv_image is not None:
                 # Process the current frame
                 self.process_frame(number, mode)
             else:
                 rospy.loginfo_once("Waiting for camera feed...")
             rospy.sleep(0.01)  # Small delay to prevent high CPU usage
+
+    def move_to_object(self, object):
+        #if the object is not in predictions, wait for 6 seconds until it appears or give up
+        # if it appears, enter while loop and begin walking towards the box
+        rate = rospy.Rate(200)
+        twist = Twist()
+        self.force_recog = True
+        while True:
+            object_list = [self.objects[i] for i in [self.predictions['labels'][i] for i in self.keep]] #same size as keep
+            print(object_list)
+            if object not in object_list:
+                continue
+            object_prediction_index = self.keep[object_list.index(object)]
+            print(self.objects[self.predictions['labels'][object_prediction_index]])
+            box = self.predictions['bboxes'][object_prediction_index]
+            self.debug_Box = box
+
+            x_min = int(box[0])
+            y_min = int(box[1])
+            x_max = int(box[2])
+            y_max = int(box[3])
+            subarray = self.disparity_map[x_min:x_max, y_min:y_max]
+            median = np.median(subarray)
+            mask = subarray >= median
+            subarray = subarray[mask]
+            depth = np.mean(subarray)
+            print(depth)
+            if depth > 1000:
+                break
+            twist.linear.x = 0.1
+            self.cmd_vel_pub.publish(twist)
+            rate.sleep()
+        self.force_recog = False
+        twist.linear.x = 0
+        self.cmd_vel_pub.publish(twist)
+
+
+        # get bounding box of object
 
     #for object segmentation
     def non_max_suppression(self, boxes, scores, threshold):
