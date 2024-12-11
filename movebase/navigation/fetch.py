@@ -7,8 +7,8 @@ from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 import tf
-pose_1 = none
-pose_2 = none
+pose_1 = None
+pose_2 = None
 
 # debugging
 def get_current_pose():
@@ -29,6 +29,7 @@ def save_pose(pose_num):
         if pose_num == 1:
             pose1 = pose
             print("Pose 1 saved.")
+            print(f"Saved Pose: {pose}")
         elif pose_num == 2:
             pose2 = pose
             print("Pose 2 saved.")
@@ -54,7 +55,7 @@ def get_goal_pose(pose_num):
     goal.target_pose.header.frame_id = 'map'  
     # or 'odom' try both tbh
     goal.target_pose.header.stamp = rospy.Time.now()
-    goal.target_pose.pose 
+    goal.target_pose.pose = pose
     return goal
 
 
@@ -81,7 +82,7 @@ def main():
 
     # Command loop
     while not rospy.is_shutdown():
-        command = input("Enter command ('save1', 'save2', 'save3', 'go1', 'go2', 'go3', or 'exit'): ").strip().lower()
+        command = input("Enter command ('save1', 'save2', 'go1', 'go2', or 'exit'): ").strip().lower()
         if command == 'save1':
             save_pose(1)
         elif command == 'save2':

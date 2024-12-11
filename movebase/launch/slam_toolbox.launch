@@ -1,8 +1,0 @@
-<launch>
-    <!-- SLAM Toolbox Node -->
-    <node name="slam_toolbox" pkg="slam_toolbox" type="sync_slam_toolbox_node" output="screen">
-        <rosparam file="$(find my_robot_navigation)/config/slam_toolbox_params.yaml" command="load" />
-        <param name="publish_map" value="true" />
-        <param name="map_update_interval" value="5.0" />
-    </node>
-</launch>
