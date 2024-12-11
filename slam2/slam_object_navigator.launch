@@ -1,0 +1,31 @@
+<launch>
+    <!-- SLAM Object Navigator -->
+    <node name="slam_object_navigator" pkg="gesture_cam" type="Slam_Object_Navigator.py" output="screen" />
+    
+    <node name="slam_gmapping" pkg="gmapping" type="slam_gmapping" output="screen">
+    <param name="base_frame" value="base_footprint" />
+    <param name="odom_frame" value="odom" />
+    <param name="map_frame" value="map" />
+    </node>
+
+    <!-- Include fiducial detection launch -->
+    
+    <include file="$(find aruco_detect)/launch/aruco_detect.launch">
+        <param name="publish_images" value="true" />
+        <arg name="do_pose_estimation" value="true" />
+        <arg name="vis_msgs" value="true" />
+        <arg name="fiducial_len" value="0.14" />
+        <arg name="dictionary" value="7" />
+        <arg name="camera" value="raspicam_node" />
+        <arg name="image" value="image" />
+    </include>
+
+    <!-- Fiducial Mapping -->
+    <node name="mapper" pkg="gesture_cam" type="mapper_real.py" output="screen" />
+    <node name="my_odom" pkg="gesture_cam" type="my_odom.py" output="screen" />
+
+
+    <!-- slam nodes -->
+    <node name="pure_pursuit" pkg="gesture_cam" type="pure_pursuit.py" output="screen" />
+    <node name="frontier_exploration" pkg="gesture_cam" type="frontier_exploration.py" output="screen" />
+</launch>

@@ -16,7 +16,7 @@ class PurePursuit:
         """
         Class constructor
         """
-        rospy.init_node("pure_pursuit")
+        # rospy.init_node("pure_pursuit")
 
         # Set if in debug mode
         self.is_in_debug_mode = (
@@ -76,16 +76,19 @@ class PurePursuit:
         Updates the current pose of the robot.
         """
         try:
-            (trans, rot) = self.tf_listener.lookupTransform(
-                "/map", "/base_footprint", rospy.Time(0)
-            )
-        except:
-            return
+            # Try to get the transform from 'map' to 'base_footprint'
+            (trans, rot) = self.tf_listener.lookupTransform("map", "base_footprint", rospy.Time(0))
+            rospy.loginfo("Using 'map' frame for odometry.")
+        except tf.Exception:
+            # Fallback to 'odom' if 'map' is unavailable
+            rospy.logwarn("Map frame not available. Falling back to odom frame.")
+            (trans, rot) = self.tf_listener.lookupTransform("odom", "base_footprint", rospy.Time(0))
 
+        # Update the robot's pose
         self.pose = Pose(
             position=Point(x=trans[0], y=trans[1]),
             orientation=Quaternion(x=rot[0], y=rot[1], z=rot[2], w=rot[3]),
-        )
+    )
 
     def update_map(self, msg: OccupancyGrid):
         """
