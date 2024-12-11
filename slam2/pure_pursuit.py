@@ -3,7 +3,7 @@
 import math
 import rospy
 import numpy as np
-from gesturebot.path_planner import PathPlanner
+from path_planner import PathPlanner
 from std_msgs.msg import Header, Bool
 from nav_msgs.msg import Path, Odometry, GridCells, OccupancyGrid
 from geometry_msgs.msg import Point, PointStamped, Twist, Vector3, Pose, Quaternion
@@ -76,16 +76,19 @@ class PurePursuit:
         Updates the current pose of the robot.
         """
         try:
-            (trans, rot) = self.tf_listener.lookupTransform(
-                "/map", "/base_footprint", rospy.Time(0)
-            )
-        except:
-            return
+            # Try to get the transform from 'map' to 'base_footprint'
+            (trans, rot) = self.tf_listener.lookupTransform("map", "base_footprint", rospy.Time(0))
+            rospy.loginfo("Using 'map' frame for odometry.")
+        except tf.Exception:
+            # Fallback to 'odom' if 'map' is unavailable
+            rospy.logwarn("Map frame not available. Falling back to odom frame.")
+            (trans, rot) = self.tf_listener.lookupTransform("odom", "base_footprint", rospy.Time(0))
 
+        # Update the robot's pose
         self.pose = Pose(
             position=Point(x=trans[0], y=trans[1]),
             orientation=Quaternion(x=rot[0], y=rot[1], z=rot[2], w=rot[3]),
-        )
+    )
 
     def update_map(self, msg: OccupancyGrid):
         """

@@ -1,6 +1,12 @@
 <launch>
     <!-- SLAM Object Navigator -->
     <node name="slam_object_navigator" pkg="gesture_cam" type="Slam_Object_Navigator.py" output="screen" />
+    
+    <node name="slam_gmapping" pkg="gmapping" type="slam_gmapping" output="screen">
+    <param name="base_frame" value="base_footprint" />
+    <param name="odom_frame" value="odom" />
+    <param name="map_frame" value="map" />
+    </node>
 
     <!-- Include fiducial detection launch -->
     
