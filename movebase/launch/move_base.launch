@@ -1,0 +1,33 @@
+<launch>
+ 
+    
+     <!-- Gmapping Node -->
+   <node name="slam_gmapping" pkg="gmapping" type="slam_gmapping" output="screen">
+      <param name="odom_frame" value="odom" />
+      <param name="map_update_interval" value="5.0" />
+   </node>
+
+    <!-- Exploration -->
+   <node name="explore" pkg="explore_lite" type="explore" output="screen" />
+
+      <!--- Run AMCL --> 
+   <include file="$(find amcl)/examples/amcl_omni.launch" />
+
+   <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+    <rosparam file="$(find gesture_cam)/src/gesturebot/movebase/config/costmap_common_params.yaml" command="load" ns="global_costmap" /> 
+    <rosparam file="$(find gesture_cam)/src/gesturebot/movebase/config/costmap_common_params.yaml" command="load" ns="local_costmap" />
+    <rosparam file="$(find gesture_cam)/src/gesturebot/movebase/config/local_costmap_params.yaml" command="load" />
+    <rosparam file="$(find gesture_cam)/src/gesturebot/movebase/config/global_costmap_params.yaml" command="load" /> 
+    <rosparam file="$(find gesture_cam)/src/gesturebot/movebase/config/base_local_planner_params.yaml" command="load" />
+    <rosparam file="$(find gesture_cam)/src/gesturebot/movebase/config/move_base_params.yaml" command="load" />
+
+   </node>
+
+
+   <!-- <node name="fetch_node" pkg="movebase" type="fetch.py" output="screen">
+      <param name="use_sim_time" value="true" />
+   </node> -->
+
+   
+</launch> 
+
