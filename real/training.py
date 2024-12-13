@@ -23,13 +23,13 @@ model = tf.keras.models.Sequential([
     tf.keras.layers.Dense(NUM_CLASSES, activation='softmax')
 ])
 
-# Model checkpoint callback
+# model checkpoint callback
 cp_callback = tf.keras.callbacks.ModelCheckpoint(
     model_save_path, verbose=1, save_weights_only=False)
-# Callback for early stopping
+# callback for early stopping
 es_callback = tf.keras.callbacks.EarlyStopping(patience=20, verbose=1)
 
-# Model compilation
+# model compile
 model.compile(
     optimizer='adam',
     loss='sparse_categorical_crossentropy',
@@ -44,9 +44,6 @@ model.fit(
     validation_data=(X_test, y_test),
     callbacks=[cp_callback, es_callback]
 )
-
-# Model evaluation
-val_loss, val_acc = model.evaluate(X_test, y_test, batch_size=128)
 
 model.export('model/keypoint_classifier/tf_model')
 converter = tf.lite.TFLiteConverter.from_saved_model('model/keypoint_classifier/tf_model')

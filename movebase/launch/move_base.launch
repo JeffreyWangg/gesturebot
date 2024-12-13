@@ -10,9 +10,6 @@
     <!-- Exploration -->
    <node name="explore" pkg="explore_lite" type="explore" output="screen" />
 
-      <!-- - Run AMCL 
-   <include file="$(find amcl)/examples/amcl_omni.launch" /> -->
-
    <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
     <rosparam file="/my_ros_data/gesture/src/movebase/config/costmap_common_params.yaml" command="load" ns="global_costmap" /> 
     <rosparam file="/my_ros_data/gesture/src/movebase/config/costmap_common_params.yaml" command="load" ns="local_costmap" />
@@ -22,11 +19,6 @@
     <rosparam file="/my_ros_data/gesture/src/movebase/config/move_base_params.yaml" command="load" />
 
    </node>
-
-
-   <!-- <node name="fetch_node" pkg="movebase" type="fetch.py" output="screen">
-      <param name="use_sim_time" value="true" />
-   </node> -->
 
    
 </launch> 

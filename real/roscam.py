@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import rospy
 from sensor_msgs.msg import CompressedImage, Image
 from geometry_msgs.msg import Point, Pose, Twist, PoseStamped
@@ -12,7 +11,7 @@ import mediapipe as mp
 import copy
 import itertools
 import csv
-from model import KeyPointClassifier  # Import KeyPointClassifier
+from model import KeyPointClassifier 
 from mmdet.apis import DetInferencer
 import torch
 import actionlib
@@ -48,8 +47,7 @@ class GestureRecognizer:
         self.cv_image = None
 
         # Subscribe to camera feed
-        # self.image_sub = rospy.Subscriber('/cv_camera/image_raw', Image, self.image_cb) 
-        # <= for branbot
+        # self.image_sub = rospy.Subscriber('/cv_camera/image_raw', Image, self.image_cb) <= for branbot
         self.image_sub = rospy.Subscriber('/raspicam_node/image/compressed',
                                           CompressedImage,
                                           self.image_cb)
@@ -77,7 +75,7 @@ class GestureRecognizer:
         self.keypoint_classifier = KeyPointClassifier()
         self.keypoint_classifier_labels = ['Open', 'Close', 'Pointer', 'OK', 'Peace Sign', 'Thumbs Up']
 
-        #================ obj seg
+        #================ object segmentation model setup
         self.force_recog = False
         self.force_stop = False
 
@@ -88,7 +86,7 @@ class GestureRecognizer:
         self.predictions = None
         self.keep = None
 
-        #================ depth 
+        #================ depth estimation setup
         self.midas = torch.hub.load("intel-isl/MiDaS", "MiDaS_small")
         midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
 
@@ -101,8 +99,7 @@ class GestureRecognizer:
 
         # MOVE BASE SETUP
         self.client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
-        # rospy.loginfo("Waiting for move_base action server...")
-        # self.client.wait_for_server()
+        self.client.wait_for_server()
         rospy.loginfo("Connected to move_base server.")
 
         while self.transform is None:
@@ -113,7 +110,6 @@ class GestureRecognizer:
 
     #get robot pose
     def get_current_pose(self):
-        """Get the current pose of the robot from the odometry topic."""
         try:
             msg = rospy.wait_for_message('/odom', Odometry, timeout=5)
             return msg.pose.pose
@@ -122,7 +118,6 @@ class GestureRecognizer:
             return None
 
     def get_goal_pose(self, object_label):
-        """Retrieve a saved pose and convert it into a MoveBaseGoal."""
         pose = self.object_poses[object_label]
         if not pose:
             print(f"Pose {object_label} has not been saved")
@@ -177,7 +172,6 @@ class GestureRecognizer:
 
     def segmentation_callback(self, event):
         if (self.gesture == 'Open' or self.force_recog) and not self.force_stop:
-            # obj seg
             output = self.inferencer(self.cv_image)
             self.predictions = output['predictions'][0]
 
@@ -191,15 +185,14 @@ class GestureRecognizer:
             self.keep = keep
             
             labels = [self.objects[i] for i in [self.predictions['labels'][i] for i in self.keep]]
-
-            print([self.predictions['scores'][i] for i in self.keep])
-            print(labels)
+            print(labels) #to see what it has read
 
             for label in labels:
                 pose = self.get_current_pose()
                 if pose:
                     self.object_poses[label] = pose
 
+            # for debugging
             image = self.cv_image
             bboxes = [self.predictions['bboxes'][i] for i in self.keep]
 
@@ -211,35 +204,40 @@ class GestureRecognizer:
             self.image_pub.publish(image_msg)
 
     def run(self):
+        use_demo_input = False
+
         rospy.Timer(rospy.Duration(1.5), self.segmentation_callback) #start object recognition callback
         rospy.Timer(rospy.Duration(1.5), self.depth_callback) #start depth estimation callback
         rospy.Timer(rospy.Duration(0.05), self.gesture_callback) #start depth estimation callback
 
         print("Gesture Recognition Running")
         while not rospy.is_shutdown():
-            # if key == 27:  # esc key
-            #     break
-
             #testing
             if self.gesture == 'Peace Sign':
-                # print("Select object to travel to")
                 rate = rospy.Rate(1)
                 objects = list(self.object_poses.keys())
-                # object_label = None
-                # index = 0
-                object_label = input("Select object to travel to: ")
-                # while self.gesture != 'Open' and not rospy.is_shutdown():
-                #     object_label = objects[index]
-                #     if self.gesture == 'Thumbs Up':
-                #         if index < len(objects) - 1:
-                #             index += 1
-                #         else:
-                #             index = 0
-                #         self.gesture_count = 0
-                #         self.previous_gesture = None
-                #         self.gesture = None
-                #     print(f"Selecting {object_label}")
-                #     rate.sleep()
+                object_label = None
+
+                #used input for demo to speed up
+                if use_demo_input:
+                    object_label = input("Select object to travel to: ")
+
+                #otherwise use thumbs up for cycling
+                else:
+                    index = 0
+
+                    while self.gesture != 'Open' and not rospy.is_shutdown():
+                        object_label = objects[index]
+                        if self.gesture == 'Thumbs Up':
+                            if index < len(objects) - 1:
+                                index += 1
+                            else:
+                                index = 0
+                            self.gesture_count = 0
+                            self.previous_gesture = None
+                            self.gesture = None
+                        print(f"Selecting {object_label}")
+                        rate.sleep()
                 self.force_stop = True
                 self.move_to_object(object_label)
 
@@ -271,7 +269,6 @@ class GestureRecognizer:
         self.cmd_vel_pub.publish(twist)
 
     def move_to_saved_pose(self, client, object_label):
-        """Send the robot to one of the saved poses."""
         goal = self.get_goal_pose(object_label)
         if goal:
             print(f"Navigating to Pose {object_label}...")
@@ -285,7 +282,6 @@ class GestureRecognizer:
         # move to saved pose
         self.move_to_saved_pose(self.client, object_label)
 
-
         #if the object is not in predictions, wait for 6 seconds until it appears or give up
         # if it appears, enter while loop and begin walking towards the box
         rate = rospy.Rate(5)
@@ -294,16 +290,11 @@ class GestureRecognizer:
         self.force_stop = False
         miss_counter = 0
 
-        print("get out of the way")
-        time.sleep(3)
-        print("starting")
-
         while True:
             if self.predictions is None or self.keep is None:
                 print("no predictions")
                 pass
             object_list = [self.objects[i] for i in [self.predictions['labels'][i] for i in self.keep]] #same size as keep
-            # print(object_list)
             if object_label not in object_list:
                 miss_counter += 1
                 if miss_counter >= 30: #for 6 seconds
@@ -312,7 +303,6 @@ class GestureRecognizer:
                 continue
             miss_counter = 0
             object_prediction_index = self.keep[object_list.index(object_label)]
-            print(self.objects[self.predictions['labels'][object_prediction_index]])
             box = self.predictions['bboxes'][object_prediction_index]
             self.debug_Box = box
 
@@ -325,7 +315,6 @@ class GestureRecognizer:
             mask = subarray >= median
             subarray = subarray[mask]
             depth = np.mean(subarray)
-            print(f"depth: {depth}")
             if depth > 800:
                 print("too close, break")
                 break
@@ -339,7 +328,7 @@ class GestureRecognizer:
         self.gesture = None
         print("move_to is done")
 
-    #for object segmentation
+    #for object segmentation, gets highest score bounding box
     def non_max_suppression(self, boxes, scores, threshold):
         order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
         keep = []
@@ -359,10 +348,10 @@ class GestureRecognizer:
         return keep
 
     def process_frame(self, number, mode):
-        image = cv.flip(self.cv_image, 1)  # Mirror image for convenience
+        image = cv.flip(self.cv_image, 1)  # mirror image for convenience
         debug_image = copy.deepcopy(image)
 
-        rgb_image = cv.cvtColor(image, cv.COLOR_BGR2RGB)
+        rgb_image = cv.cvtColor(image, cv.COLOR_BGR2RGB) #need rgb 
         results = self.hands.process(rgb_image)
 
         if results.multi_hand_landmarks:
@@ -412,7 +401,7 @@ class GestureRecognizer:
             landmark[0] -= base_x
             landmark[1] -= base_y
 
-        # Flatten the list
+        #make list flat
         temp_landmark_list = list(itertools.chain.from_iterable(temp_landmark_list))
 
         # Normalize the scale
@@ -428,7 +417,7 @@ class GestureRecognizer:
     
     def select_mode(self, key, mode):
         number = -1
-        if 48 <= key <= 57:  # 0 ~ 9
+        if 48 <= key <= 57:  #numbers for csv logging
             number = key - 48
         if key == 110:  # n, to change back to no logging
             mode = 0
