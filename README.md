@@ -14,9 +14,9 @@ The navigation system combines SLAM mapping and movebase. These components work 
 
 
 ## Usage
-First bring up the master node on the robot
-Then do ```cd gesture/src/movebase/launch``` and ```roslaunch move_base.launch```
-Finally, run ```python roscam.py```
+To run the robot, first bring up the master node on the robot.
+Then do ```cd movebase/launch``` and run ```roslaunch move_base.launch```.
+After, do ```cd real``` and run ```python3 roscam.py```.
 Minimum python version 3.x
 
 ## Links
