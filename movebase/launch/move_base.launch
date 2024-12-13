@@ -10,8 +10,8 @@
     <!-- Exploration -->
    <node name="explore" pkg="explore_lite" type="explore" output="screen" />
 
-      <!--- Run AMCL --> 
-   <include file="$(find amcl)/examples/amcl_omni.launch" />
+      <!-- - Run AMCL 
+   <include file="$(find amcl)/examples/amcl_omni.launch" /> -->
 
    <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
     <rosparam file="/my_ros_data/gesture/src/movebase/config/costmap_common_params.yaml" command="load" ns="global_costmap" /> 

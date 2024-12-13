@@ -98,10 +98,10 @@ class GestureRecognizer:
 
         # MOVE BASE SETUP
         self.client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
-        rospy.loginfo("Waiting for move_base action server...")
+        # rospy.loginfo("Waiting for move_base action server...")
         self.client.wait_for_server()
         rospy.loginfo("Connected to move_base server.")
-        
+
         while self.transform is None:
             pass
 
@@ -346,7 +346,7 @@ class GestureRecognizer:
                     self.gesture_count += 1
                 else:
                     self.gesture_count = 0
-                if self.gesture_count > 30:
+                if self.gesture_count > 20:
                     print(f"Gesture is now {hand_sign_label}")
                     self.gesture = hand_sign_label
                 self.previous_gesture = hand_sign_label
