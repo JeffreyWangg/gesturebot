@@ -8,7 +8,7 @@ dataset = 'model/keypoint_classifier/keypoint.csv'
 model_save_path = 'model/keypoint_classifier/keypoint_classifier.keras'
 tflite_save_path = 'model/keypoint_classifier/keypoint_classifier.tflite'
 
-NUM_CLASSES = 5
+NUM_CLASSES = 6
 
 X_dataset = np.loadtxt(dataset, delimiter=',', dtype='float32', usecols=list(range(1, (21 * 2) + 1)))
 y_dataset = np.loadtxt(dataset, delimiter=',', dtype='int32', usecols=(0))
