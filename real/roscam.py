@@ -2,7 +2,9 @@
 # -*- coding: utf-8 -*-
 import rospy
 from sensor_msgs.msg import CompressedImage, Image
-from geometry_msgs.msg import Point, Pose, Twist
+from geometry_msgs.msg import Point, Pose, Twist, PoseStamped
+from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
+from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge
 import cv2 as cv
 import numpy as np
@@ -13,10 +15,14 @@ import csv
 from model import KeyPointClassifier  # Import KeyPointClassifier
 from mmdet.apis import DetInferencer
 import torch
+import actionlib
+import tf
+import time
 
 class GestureRecognizer:
     def __init__(self):
 
+        #object store
         self.objects = [
         "person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", "boat",
         "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog",
@@ -33,12 +39,17 @@ class GestureRecognizer:
             "person", "chair", "tvmonitor", "diningtable", "bench"
         ]
 
+        #===================
+        # POSE LOCATION
+        self.object_poses = {}
+
         # ROS setup
         self.bridge = CvBridge()
         self.cv_image = None
 
         # Subscribe to camera feed
-        # rospy.Subscriber('/cv_camera/image_raw', Image, self.image_cb) <= for branbot
+        # self.image_sub = rospy.Subscriber('/cv_camera/image_raw', Image, self.image_cb) 
+        # <= for branbot
         self.image_sub = rospy.Subscriber('/raspicam_node/image/compressed',
                                           CompressedImage,
                                           self.image_cb)
@@ -85,8 +96,41 @@ class GestureRecognizer:
 
         self.transform = midas_transforms.small_transform
 
-        while self.transform and self.cv_image is None:
+        # MOVE BASE SETUP
+        self.client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
+        rospy.loginfo("Waiting for move_base action server...")
+        self.client.wait_for_server()
+        rospy.loginfo("Connected to move_base server.")
+        
+        while self.transform is None:
             pass
+
+        while self.cv_image is None:
+            pass
+
+    #get robot pose
+    def get_current_pose(self):
+        """Get the current pose of the robot from the odometry topic."""
+        try:
+            msg = rospy.wait_for_message('/odom', Odometry, timeout=5)
+            return msg.pose.pose
+        except rospy.ROSException:
+            print("can't get pose :(((((")
+            return None
+
+    def get_goal_pose(self, object_label):
+        """Retrieve a saved pose and convert it into a MoveBaseGoal."""
+        pose = self.object_poses[object_label]
+        if not pose:
+            print(f"Pose {object_label} has not been saved")
+            return None
+
+        goal = MoveBaseGoal()
+        goal.target_pose.header.frame_id = 'map'
+        # or 'odom' try both tbh
+        goal.target_pose.header.stamp = rospy.Time.now()
+        goal.target_pose.pose = pose
+        return goal
 
     def image_cb(self, msg):
         try:
@@ -134,8 +178,15 @@ class GestureRecognizer:
                 keep = list(filter(lambda index: self.objects[self.predictions['labels'][index]] not in self.banned_objects, keep))
             self.keep = keep
             
+            labels = [self.objects[i] for i in [self.predictions['labels'][i] for i in self.keep]]
+
             print([self.predictions['scores'][i] for i in self.keep])
-            print([self.objects[i] for i in [self.predictions['labels'][i] for i in self.keep]])
+            print(labels)
+
+            for label in labels:
+                pose = self.get_current_pose()
+                if pose:
+                    self.object_poses[label] = pose
 
             image = self.cv_image
             bboxes = [self.predictions['bboxes'][i] for i in self.keep]
@@ -160,54 +211,97 @@ class GestureRecognizer:
             number, mode = self.select_mode(key, mode)
 
             #testing
+            if self.gesture == 'Peace Sign':
+                self.move_to_object("laptop")
+
+            if self.gesture == 'Close':
+                self.forward()
+
             if self.gesture == 'Pointer':
-                self.move_to_object("book")
+                self.right()
 
             if self.cv_image is not None:
                 # Process the current frame
                 self.process_frame(number, mode)
             rospy.sleep(0.01)  # Small delay to prevent high CPU usage
 
-    def move_to_object(self, object):
+    def forward(self):
+        twist = Twist()
+        twist.linear.x = 0.1
+        self.cmd_vel_pub.publish(twist)
+
+    def right(self):
+        twist = Twist()
+        twist.angular.z = 0.3
+        self.cmd_vel_pub.publish(twist)
+
+    def move_to_saved_pose(self, client, object_label):
+        """Send the robot to one of the saved poses."""
+        goal = self.get_goal_pose(object_label)
+        if goal:
+            print(f"Navigating to Pose {object_label}...")
+            client.send_goal(goal)
+            client.wait_for_result()
+            print(f"Arrived at Pose {object_label}.")
+        else:
+            print("invalid goal")
+
+    def move_to_object(self, object_label):
+        # move to saved pose
+        self.move_to_saved_pose(self.client, object_label)
+
+
         #if the object is not in predictions, wait for 6 seconds until it appears or give up
         # if it appears, enter while loop and begin walking towards the box
-        rate = rospy.Rate(200)
+        rate = rospy.Rate(5)
         twist = Twist()
         self.force_recog = True
         miss_counter = 0
 
-        while True:
-            object_list = [self.objects[i] for i in [self.predictions['labels'][i] for i in self.keep]] #same size as keep
-            print(object_list)
-            if object not in object_list:
-                miss_counter += 1
-                if miss_counter >= 30: #for 6 seconds
-                    break
-                continue
-            miss_counter = 0
-            object_prediction_index = self.keep[object_list.index(object)]
-            print(self.objects[self.predictions['labels'][object_prediction_index]])
-            box = self.predictions['bboxes'][object_prediction_index]
-            self.debug_Box = box
+        print("get out of the way")
+        time.sleep(3)
+        print("starting")
 
-            x_min = int(box[0])
-            y_min = int(box[1])
-            x_max = int(box[2])
-            y_max = int(box[3])
-            subarray = self.disparity_map[x_min:x_max, y_min:y_max]
-            median = np.median(subarray)
-            mask = subarray >= median
-            subarray = subarray[mask]
-            depth = np.mean(subarray)
-            print(depth)
-            if depth > 1000:
-                break
-            twist.linear.x = 0.1
-            self.cmd_vel_pub.publish(twist)
-            rate.sleep()
+        # while True:
+        #     if self.predictions is None or self.keep is None:
+        #         print("no predictions")
+        #         pass
+        #     object_list = [self.objects[i] for i in [self.predictions['labels'][i] for i in self.keep]] #same size as keep
+        #     # print(object_list)
+        #     if object_label not in object_list:
+        #         miss_counter += 1
+        #         if miss_counter >= 30: #for 6 seconds
+        #             print("missed too much, break")
+        #             break
+        #         continue
+        #     miss_counter = 0
+        #     object_prediction_index = self.keep[object_list.index(object_label)]
+        #     print(self.objects[self.predictions['labels'][object_prediction_index]])
+        #     box = self.predictions['bboxes'][object_prediction_index]
+        #     self.debug_Box = box
+
+        #     x_min = int(box[0])
+        #     y_min = int(box[1])
+        #     x_max = int(box[2])
+        #     y_max = int(box[3])
+        #     subarray = self.disparity_map[x_min:x_max, y_min:y_max]
+        #     median = np.median(subarray)
+        #     mask = subarray >= median
+        #     subarray = subarray[mask]
+        #     depth = np.mean(subarray)
+        #     print(f"depth: {depth}")
+        #     if depth > 800:
+        #         print("too close, break")
+        #         break
+        #     twist.linear.x = 0.02
+        #     self.cmd_vel_pub.publish(twist)
+        #     rate.sleep()
+
         self.force_recog = False
         twist.linear.x = 0
         self.cmd_vel_pub.publish(twist)
+        self.gesture = None
+        print("move_to is done")
 
     #for object segmentation
     def non_max_suppression(self, boxes, scores, threshold):
@@ -256,7 +350,6 @@ class GestureRecognizer:
                     print(f"Gesture is now {hand_sign_label}")
                     self.gesture = hand_sign_label
                 self.previous_gesture = hand_sign_label
-
 
                 # debug image
                 debug_image = self.draw_landmarks(debug_image, landmark_list)
@@ -318,7 +411,6 @@ class GestureRecognizer:
                 writer.writerow([number, *landmark_list])
                 print(f"logged {number}")
         return
-
 
 if __name__ == "__main__":
     rospy.init_node("gesture_recognizer")
