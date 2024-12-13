@@ -222,23 +222,24 @@ class GestureRecognizer:
 
             #testing
             if self.gesture == 'Peace Sign':
-                print("Select object to travel to")
+                # print("Select object to travel to")
                 rate = rospy.Rate(1)
                 objects = list(self.object_poses.keys())
-                object_label = None
-                index = 0
-                while self.gesture != 'Open' and not rospy.is_shutdown():
-                    object_label = objects[index]
-                    if self.gesture == 'Thumbs Up':
-                        if index < len(objects) - 1:
-                            index += 1
-                        else:
-                            index = 0
-                        self.gesture_count = 0
-                        self.previous_gesture = None
-                        self.gesture = None
-                    print(f"Selecting {object_label}")
-                    rate.sleep()
+                # object_label = None
+                # index = 0
+                object_label = input("Select object to travel to: ")
+                # while self.gesture != 'Open' and not rospy.is_shutdown():
+                #     object_label = objects[index]
+                #     if self.gesture == 'Thumbs Up':
+                #         if index < len(objects) - 1:
+                #             index += 1
+                #         else:
+                #             index = 0
+                #         self.gesture_count = 0
+                #         self.previous_gesture = None
+                #         self.gesture = None
+                #     print(f"Selecting {object_label}")
+                #     rate.sleep()
                 self.force_stop = True
                 self.move_to_object(object_label)
 
@@ -247,6 +248,9 @@ class GestureRecognizer:
 
             if self.gesture == 'Pointer':
                 self.right()
+
+            if self.gesture == 'Thumbs Up':
+                self.stop()
 
             rospy.sleep(0.01)  # Small delay to prevent high CPU usage
 
@@ -258,6 +262,12 @@ class GestureRecognizer:
     def right(self):
         twist = Twist()
         twist.angular.z = 0.3
+        self.cmd_vel_pub.publish(twist)
+
+    def stop(self):
+        twist = Twist()
+        twist.linear.x = 0.0
+        twist.angular.z = 0.0
         self.cmd_vel_pub.publish(twist)
 
     def move_to_saved_pose(self, client, object_label):
@@ -372,7 +382,7 @@ class GestureRecognizer:
                     self.gesture_count += 1
                 else:
                     self.gesture_count = 0
-                if self.gesture_count > 20:
+                if self.gesture_count > 10:
                     print(f"Gesture is now {hand_sign_label}")
                     self.gesture = hand_sign_label
                 self.previous_gesture = hand_sign_label
