@@ -67,6 +67,7 @@ class GestureRecognizer:
             min_detection_confidence=0.7,
             min_tracking_confidence=0.5,
         )
+        self.mode = 0
 
         self.gesture_count = 0
         self.previous_gesture = None
@@ -74,10 +75,12 @@ class GestureRecognizer:
 
         # Keypoint Classifier setup
         self.keypoint_classifier = KeyPointClassifier()
-        self.keypoint_classifier_labels = ['Open', 'Close', 'Pointer', 'OK', 'Peace Sign']
+        self.keypoint_classifier_labels = ['Open', 'Close', 'Pointer', 'OK', 'Peace Sign', 'Thumbs Up']
 
         #================ obj seg
         self.force_recog = False
+        self.force_stop = False
+
         config_file = 'rtmdet_tiny_8xb32-300e_coco.py'
         checkpoint_file = 'rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth'
         self.inferencer = DetInferencer(config_file, checkpoint_file, device="cpu")
@@ -99,7 +102,7 @@ class GestureRecognizer:
         # MOVE BASE SETUP
         self.client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
         # rospy.loginfo("Waiting for move_base action server...")
-        self.client.wait_for_server()
+        # self.client.wait_for_server()
         rospy.loginfo("Connected to move_base server.")
 
         while self.transform is None:
@@ -137,8 +140,17 @@ class GestureRecognizer:
             self.cv_image = self.bridge.compressed_imgmsg_to_cv2(msg)
         except Exception as e:
             rospy.logerr(f"Image conversion failed: {e}")
+    
+    def gesture_callback(self, event):
+        key = cv.waitKey(10)
+        number, self.mode = self.select_mode(key, self.mode)
+        if self.cv_image is not None and not self.force_stop:
+            # Process the current frame
+            self.process_frame(number, self.mode)
 
     def depth_callback(self, event):
+        if self.force_stop:
+            return
         input_batch = self.transform(self.cv_image).to(self.device)
 
         with torch.no_grad():
@@ -164,7 +176,7 @@ class GestureRecognizer:
         self.depth_image_pub.publish(image_msg)
 
     def segmentation_callback(self, event):
-        if self.gesture == 'Open' or self.force_recog:
+        if (self.gesture == 'Open' or self.force_recog) and not self.force_stop:
             # obj seg
             output = self.inferencer(self.cv_image)
             self.predictions = output['predictions'][0]
@@ -201,18 +213,34 @@ class GestureRecognizer:
     def run(self):
         rospy.Timer(rospy.Duration(1.5), self.segmentation_callback) #start object recognition callback
         rospy.Timer(rospy.Duration(1.5), self.depth_callback) #start depth estimation callback
+        rospy.Timer(rospy.Duration(0.05), self.gesture_callback) #start depth estimation callback
 
-        mode = 0
         print("Gesture Recognition Running")
         while not rospy.is_shutdown():
-            key = cv.waitKey(10)
-            if key == 27:  # esc key
-                break
-            number, mode = self.select_mode(key, mode)
+            # if key == 27:  # esc key
+            #     break
 
             #testing
             if self.gesture == 'Peace Sign':
-                self.move_to_object("laptop")
+                print("Select object to travel to")
+                rate = rospy.Rate(1)
+                objects = list(self.object_poses.keys())
+                object_label = None
+                index = 0
+                while self.gesture != 'Open' and not rospy.is_shutdown():
+                    object_label = objects[index]
+                    if self.gesture == 'Thumbs Up':
+                        if index < len(objects) - 1:
+                            index += 1
+                        else:
+                            index = 0
+                        self.gesture_count = 0
+                        self.previous_gesture = None
+                        self.gesture = None
+                    print(f"Selecting {object_label}")
+                    rate.sleep()
+                self.force_stop = True
+                self.move_to_object(object_label)
 
             if self.gesture == 'Close':
                 self.forward()
@@ -220,9 +248,6 @@ class GestureRecognizer:
             if self.gesture == 'Pointer':
                 self.right()
 
-            if self.cv_image is not None:
-                # Process the current frame
-                self.process_frame(number, mode)
             rospy.sleep(0.01)  # Small delay to prevent high CPU usage
 
     def forward(self):
@@ -256,46 +281,47 @@ class GestureRecognizer:
         rate = rospy.Rate(5)
         twist = Twist()
         self.force_recog = True
+        self.force_stop = False
         miss_counter = 0
 
         print("get out of the way")
         time.sleep(3)
         print("starting")
 
-        # while True:
-        #     if self.predictions is None or self.keep is None:
-        #         print("no predictions")
-        #         pass
-        #     object_list = [self.objects[i] for i in [self.predictions['labels'][i] for i in self.keep]] #same size as keep
-        #     # print(object_list)
-        #     if object_label not in object_list:
-        #         miss_counter += 1
-        #         if miss_counter >= 30: #for 6 seconds
-        #             print("missed too much, break")
-        #             break
-        #         continue
-        #     miss_counter = 0
-        #     object_prediction_index = self.keep[object_list.index(object_label)]
-        #     print(self.objects[self.predictions['labels'][object_prediction_index]])
-        #     box = self.predictions['bboxes'][object_prediction_index]
-        #     self.debug_Box = box
+        while True:
+            if self.predictions is None or self.keep is None:
+                print("no predictions")
+                pass
+            object_list = [self.objects[i] for i in [self.predictions['labels'][i] for i in self.keep]] #same size as keep
+            # print(object_list)
+            if object_label not in object_list:
+                miss_counter += 1
+                if miss_counter >= 30: #for 6 seconds
+                    print("missed too much, break")
+                    break
+                continue
+            miss_counter = 0
+            object_prediction_index = self.keep[object_list.index(object_label)]
+            print(self.objects[self.predictions['labels'][object_prediction_index]])
+            box = self.predictions['bboxes'][object_prediction_index]
+            self.debug_Box = box
 
-        #     x_min = int(box[0])
-        #     y_min = int(box[1])
-        #     x_max = int(box[2])
-        #     y_max = int(box[3])
-        #     subarray = self.disparity_map[x_min:x_max, y_min:y_max]
-        #     median = np.median(subarray)
-        #     mask = subarray >= median
-        #     subarray = subarray[mask]
-        #     depth = np.mean(subarray)
-        #     print(f"depth: {depth}")
-        #     if depth > 800:
-        #         print("too close, break")
-        #         break
-        #     twist.linear.x = 0.02
-        #     self.cmd_vel_pub.publish(twist)
-        #     rate.sleep()
+            x_min = int(box[0])
+            y_min = int(box[1])
+            x_max = int(box[2])
+            y_max = int(box[3])
+            subarray = self.disparity_map[x_min:x_max, y_min:y_max]
+            median = np.median(subarray)
+            mask = subarray >= median
+            subarray = subarray[mask]
+            depth = np.mean(subarray)
+            print(f"depth: {depth}")
+            if depth > 800:
+                print("too close, break")
+                break
+            twist.linear.x = 0.02
+            self.cmd_vel_pub.publish(twist)
+            rate.sleep()
 
         self.force_recog = False
         twist.linear.x = 0
@@ -405,7 +431,7 @@ class GestureRecognizer:
         if mode == 0:
             pass
         if mode == 1 and (0 <= number <= 9):
-            csv_path = '/my_ros_data/catkin_ws/src/cosi119_src/gesture_cam/gesturebot/real/model/keypoint_classifier/keypoint.csv'
+            csv_path = '/my_ros_data/gesture/src/real/model/keypoint_classifier/keypoint.csv'
             with open(csv_path, 'a', newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow([number, *landmark_list])
